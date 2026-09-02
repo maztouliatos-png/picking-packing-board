@@ -53,13 +53,21 @@
   html,body{margin:0;padding:0;}
   body{ background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
   .mono{ font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; }
-  .wrap{ max-width:880px; margin:0 auto; padding:28px 20px 80px; }
+  .wrap{ position:relative; max-width:880px; margin:0 auto; padding:28px 20px 80px; }
 
   .head{ display:flex; align-items:center; gap:14px; margin-bottom:22px; }
   .head-icon{ width:44px; height:44px; border-radius:11px; flex:none; background:var(--accent); color:var(--accent-ink);
     display:flex; align-items:center; justify-content:center; font-size:19px; font-weight:700; box-shadow:var(--shadow); }
   .head h1{ margin:0; font-size:21px; font-weight:700; letter-spacing:-0.01em; }
   .head .sub{ margin-top:2px; font-size:11.5px; letter-spacing:0.09em; color:var(--ink-dim); text-transform:uppercase; }
+
+  .brand-logo{ position:absolute; top:20px; right:20px; height:69px; width:auto; aspect-ratio:800/344;
+    border-radius:9px; overflow:hidden; box-shadow:0 3px 14px rgba(0,0,0,.35); }
+  .brand-logo svg{ display:block; height:100%; width:100%; }
+  @media (max-width:640px){
+    .wrap{ padding-top:80px; }
+    .brand-logo{ top:14px; height:48px; }
+  }
 
   .statusline{ min-height:18px; font-size:12.5px; margin:-10px 0 18px; display:flex; align-items:center; gap:6px; color:var(--ink-dim); }
   .statusline .dot{ width:6px; height:6px; border-radius:50%; background:var(--ink-dim); flex:none; }
@@ -342,6 +350,7 @@
   var PHOTOS_BUCKET = "photos";
   var CAMERA_SVG = "<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z\"/><circle cx=\"12\" cy=\"13\" r=\"4\"/></svg>";
   var BARCODE_SVG = "<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><rect x=\"2\" y=\"4\" width=\"2\" height=\"16\"/><rect x=\"6\" y=\"4\" width=\"1\" height=\"16\"/><rect x=\"9\" y=\"4\" width=\"3\" height=\"16\"/><rect x=\"14\" y=\"4\" width=\"1\" height=\"16\"/><rect x=\"17\" y=\"4\" width=\"2\" height=\"16\"/><rect x=\"21\" y=\"4\" width=\"1\" height=\"16\"/></svg>";
+  var FIEGE_LOGO_HTML = '<div class="brand-logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 344"><defs><linearGradient id="fiegeGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#F5093A"/><stop offset="45%" stop-color="#8C1770"/><stop offset="100%" stop-color="#39CCD4"/></linearGradient></defs><rect x="0" y="0" width="800" height="344" fill="url(#fiegeGrad)"/><g transform="translate(0.000000,344.000000) scale(0.100000,-0.100000)" fill="#FFFFFF" stroke="none"><path d="M1655 2553 c-78 -4 -115 -19 -115 -47 0 -6 -20 -40 -45 -76 -25 -36 -45 -70 -45 -76 0 -6 -20 -39 -45 -75 -25 -35 -45 -67 -45 -71 0 -4 -13 -26 -28 -50 -16 -24 -42 -68 -58 -98 -15 -30 -39 -68 -51 -83 -13 -16 -23 -33 -23 -38 0 -5 -27 -54 -60 -110 -33 -55 -60 -107 -60 -116 0 -18 77 -164 136 -258 24 -38 51 -86 60 -105 18 -39 86 -157 121 -208 12 -18 31 -52 43 -75 12 -23 32 -60 45 -82 13 -22 33 -56 44 -76 11 -20 28 -40 38 -44 10 -5 235 -10 501 -13 460 -4 484 -3 504 14 11 11 24 28 29 39 5 11 20 38 34 60 13 22 31 54 39 71 8 17 22 36 30 44 9 7 16 16 16 21 0 8 83 154 161 284 10 17 27 49 39 71 11 23 33 61 49 85 62 98 91 150 91 168 0 10 -29 67 -65 127 -35 60 -71 123 -80 139 -9 17 -26 47 -38 67 -12 20 -58 98 -102 172 -44 75 -90 153 -102 174 -13 20 -28 48 -35 62 -6 14 -27 44 -46 68 l-33 42 -412 -2 c-227 -1 -448 -4 -492 -5z m667 -57 c206 -2 212 -3 244 -71 8 -16 25 -48 39 -70 13 -22 29 -49 35 -60 5 -11 22 -41 38 -67 15 -25 63 -108 107 -183 44 -75 89 -152 100 -170 11 -19 35 -59 53 -89 39 -67 40 -91 7 -136 -14 -19 -25 -38 -25 -44 0 -5 -6 -17 -14 -25 -7 -9 -27 -42 -44 -73 -17 -32 -43 -77 -59 -101 -16 -23 -56 -89 -89 -146 -32 -56 -68 -118 -79 -136 -11 -19 -35 -60 -54 -92 -19 -32 -43 -68 -54 -81 l-20 -22 -448 0 -447 0 -87 148 c-48 81 -103 171 -121 200 -43 66 -111 176 -137 222 -78 139 -107 195 -107 211 0 24 36 98 83 172 20 32 55 92 78 135 22 42 53 95 69 117 16 22 42 65 58 95 16 30 46 87 67 125 20 39 53 89 72 113 l35 43 257 -7 c141 -3 340 -7 443 -8z M2025 2410 c-11 -4 -27 -16 -35 -26 -24 -29 -150 -240 -150 -252 0 -5 -9 -20 -19 -34 -11 -13 -29 -44 -42 -68 -13 -25 -37 -65 -54 -90 -43 -63 -85 -146 -85 -169 0 -10 7 -22 16 -25 9 -3 102 -6 208 -6 214 0 207 -2 253 77 10 17 45 78 78 134 58 100 74 126 163 280 24 41 47 81 53 89 41 66 37 85 -23 93 -65 9 -340 7 -363 -3z M1634 1666 c-6 -16 63 -152 123 -244 21 -31 51 -82 67 -112 16 -30 32 -60 37 -66 5 -6 23 -37 40 -70 17 -32 38 -66 45 -75 8 -8 14 -20 14 -26 0 -6 9 -22 21 -37 l20 -26 220 0 c180 0 221 3 225 14 5 14 -1 28 -49 108 -12 21 -49 83 -82 139 -33 55 -68 113 -78 127 -9 15 -26 45 -38 67 -11 22 -44 78 -73 125 l-52 85 -217 3 c-183 2 -218 0 -223 -12z M3514 2105 c-20 -15 -26 -721 -6 -741 18 -18 192 -20 210 -2 8 8 12 52 12 134 0 88 4 125 13 132 8 7 71 13 153 14 l139 3 3 73 c2 46 -2 79 -9 88 -9 11 -42 14 -143 14 -89 0 -136 4 -144 12 -16 16 -15 65 1 75 6 4 80 6 163 5 188 -4 184 -6 177 110 -3 46 -6 84 -7 85 -6 8 -552 6 -562 -2z M4200 2106 c-6 -6 -10 -147 -10 -377 0 -325 2 -368 16 -373 24 -9 187 -7 203 3 11 7 13 74 12 372 -1 200 -5 367 -9 370 -12 12 -201 16 -212 5z M5526 2092 c-70 -38 -137 -107 -174 -181 -31 -62 -32 -68 -32 -190 0 -108 3 -131 20 -159 11 -18 20 -38 20 -45 0 -7 23 -38 50 -69 96 -108 258 -155 367 -108 29 12 58 28 64 36 17 20 52 17 67 -6 11 -18 21 -21 80 -18 l67 3 3 195 c2 174 1 196 -15 207 -20 16 -229 18 -266 4 -32 -12 -38 -33 -29 -101 7 -55 7 -55 45 -58 28 -2 37 -8 37 -22 0 -27 -60 -60 -109 -60 -54 0 -91 20 -130 69 -30 38 -31 42 -31 143 0 96 2 107 25 139 38 51 53 59 114 59 52 0 56 -2 96 -45 l42 -46 99 3 c96 3 99 4 102 27 8 54 -107 211 -155 211 -8 0 -26 9 -40 20 -23 18 -40 20 -147 19 -111 -1 -125 -3 -170 -27z M6204 2113 c-8 -6 -13 -118 -17 -369 -6 -338 -5 -363 12 -378 15 -14 55 -16 312 -16 163 0 301 4 309 10 9 6 16 31 18 77 6 105 2 107 -217 111 -101 2 -181 8 -188 14 -16 13 -17 54 -2 64 6 3 83 8 171 10 102 2 165 7 174 15 16 13 20 135 4 159 -8 12 -39 15 -177 15 l-167 0 -10 27 c-19 53 -3 58 190 58 164 0 175 1 195 21 18 18 21 30 17 85 -6 103 9 99 -326 102 -158 1 -292 -1 -298 -5z M4599 1953 c-1 -87 -3 -252 -5 -367 -3 -144 0 -213 7 -223 16 -18 609 -19 627 -1 14 14 16 146 3 166 -6 11 -49 14 -192 14 -115 -1 -188 3 -196 10 -17 14 -17 63 0 77 8 6 77 12 178 13 l164 3 3 73 c2 46 -2 79 -9 88 -9 11 -46 14 -174 14 -139 0 -164 2 -169 16 -11 29 -6 63 11 72 10 6 83 8 172 5 101 -3 166 -1 184 6 26 10 27 13 27 89 0 47 -5 83 -12 90 -9 9 -93 12 -315 12 l-303 0 -1 -157z"/></g></svg></div>';
 
   var STATE = { entries: [] };
   var supabase = null, readOnly = false;
@@ -910,6 +919,7 @@
     html += "<div class=\"wrap\">";
     html += "  <div class=\"head\"><div class=\"head-icon\">✓</div>";
     html += "    <div><h1>Picking &amp; Packing Audits Board</h1><div class=\"sub\">Picking &middot; Packing</div></div></div>";
+    html += FIEGE_LOGO_HTML;
     html += "  <div id=\"statusline\" class=\"statusline\"><span class=\"dot\"></span><span id=\"statusText\"></span></div>";
     html += "  <div id=\"banner\" class=\"banner"+(configBannerMsg?" show":"")+"\">"+esc(configBannerMsg||"")+"</div>";
 
