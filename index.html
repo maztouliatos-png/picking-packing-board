@@ -288,7 +288,8 @@
   .photo-addbtn:hover{ color:var(--accent); border-color:var(--accent); }
   .photo-thumb{ position:relative; width:38px; height:38px; border-radius:8px; overflow:hidden; border:1px solid var(--border); flex:none; background:var(--surface-2); }
   .photo-row.readonly .photo-thumb{ width:34px; height:34px; }
-  .photo-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .photo-thumb img{ width:100%; height:100%; object-fit:cover; display:block; cursor:zoom-in; }
+  .photo-thumb.uploading img{ cursor:default; }
   .photo-remove{ position:absolute; top:-1px; right:-1px; width:16px; height:16px; border-radius:50%; border:none; background:rgba(20,22,26,0.72);
     color:#fff; font-size:11px; line-height:1; cursor:pointer; padding:0; }
   .photo-spinner{ position:absolute; inset:0; background:rgba(20,22,26,0.35); }
@@ -334,7 +335,7 @@
       { id:"pk1", text:"Correct packaging used?", options:["Yes","No"], good:"Yes" },
       { id:"pk2", text:"Correct quantity packed?", options:["Yes","No"], good:"Yes" },
       { id:"pk3", text:"Correct void fill used?", options:["Yes","No","N/A"], good:"Yes" },
-      { id:"pk4", text:"Correct label placement?", options:["Yes","No"], good:"Yes" }
+      { id:"pk4", text:"Correct label placement?", options:["Yes","No"], good:"Yes", allowPhotos:true, photosOnFail:true }
     ],
     Picking: [
       { id:"pi1", text:"Correct quantity picked?", options:["Yes","No"], good:"Yes", requiresProductIdOnFail:true },
@@ -522,6 +523,27 @@
     var a = draft[type].answers[idx];
     return isBadAnswer(type, idx, a.result) && !(a.comment && a.comment.trim());
   }
+  // Whether a question offers photo evidence at all, and whether the
+  // "add photo" control should only appear once the answer is failing (e.g.
+  // Packing's "Correct label placement..." question — a photo is only
+  // useful to explain what's wrong). The id check is a safety net: this
+  // question's wording has been customised via "Edit checklist" in the
+  // live board, and a topic loaded from Supabase won't carry a field this
+  // app didn't know about when it was saved, so the id keeps the on-fail
+  // photo behaviour working regardless of what's stored for it.
+  function photoPolicyFor(q){
+    if (!q) return { allow:false, onFail:false };
+    var allow = !!q.allowPhotos, onFail = !!q.photosOnFail;
+    if (q.id === "pk4"){ allow = true; onFail = true; }
+    return { allow: allow, onFail: onFail };
+  }
+  function photosActiveFor(type, idx, q){
+    var policy = photoPolicyFor(q);
+    if (!policy.allow) return false;
+    if (!policy.onFail) return true;
+    var a = draft[type].answers[idx];
+    return isBadAnswer(type, idx, a.result);
+  }
   function refreshCommentState(qe, type, idx){
     var missing = commentMissing(type, idx);
     qe.classList.toggle("missing-comment", missing);
@@ -531,6 +553,34 @@
       var needsPid = isBadAnswer(type, idx, a.result);
       qe.classList.toggle("needs-productid", needsPid);
       qe.classList.toggle("missing-productid", productIdMissing(type, idx));
+    }
+    if (q) refreshPhotoAddVisibility(qe, type, idx, q);
+  }
+  // Adds or removes the camera "add photo" control live (without a full
+  // re-render, so the comment textarea and other fields on the same
+  // question keep their focus/state) whenever the answer changes and this
+  // question only offers photos on a failing answer. Already-attached
+  // photos stay visible either way — only the ability to add more toggles.
+  function refreshPhotoAddVisibility(qe, type, idx, q){
+    var policy = photoPolicyFor(q);
+    if (!policy.allow || !policy.onFail) return;
+    var optrow = qe.querySelector(".optrow");
+    if (!optrow) return;
+    var active = photosActiveFor(type, idx, q);
+    var existing = optrow.querySelector(".photo-addbtn");
+    if (active && !existing){
+      var label = document.createElement("label");
+      label.className = "photo-addbtn";
+      label.setAttribute("data-photo-add", idx);
+      label.title = "Attach photo evidence";
+      label.innerHTML = CAMERA_SVG + "<input type=\"file\" accept=\"image/*\" capture=\"environment\" multiple data-photo-input=\""+idx+"\" style=\"display:none\">";
+      optrow.appendChild(label);
+      label.querySelector("input").addEventListener("change", function(e){
+        handlePhotoFiles(type, idx, e.target.files);
+        e.target.value = "";
+      });
+    } else if (!active && existing){
+      existing.remove();
     }
   }
 
@@ -845,7 +895,7 @@
   // touch live state until Save is pressed.
   function ensureTopicsDraft(type){
     if (!topicsDraft[type]){
-      topicsDraft[type] = topicsFor(type).map(function(tp){ return { id:tp.id, text:tp.text, options:tp.options.slice(), good:tp.good, allowPhotos: !!tp.allowPhotos, requiresProductIdOnFail: !!tp.requiresProductIdOnFail }; });
+      topicsDraft[type] = topicsFor(type).map(function(tp){ return { id:tp.id, text:tp.text, options:tp.options.slice(), good:tp.good, allowPhotos: !!tp.allowPhotos, photosOnFail: !!tp.photosOnFail, requiresProductIdOnFail: !!tp.requiresProductIdOnFail }; });
     }
   }
 
@@ -1103,7 +1153,8 @@
           var pidMissing = needsPid && productIdMissing(type, idx);
           html += "        <div class=\"qentry"+(missing?" missing-comment":"")+(needsPid?" needs-productid":"")+(pidMissing?" missing-productid":"")+"\" data-qidx=\""+idx+"\">";
           html += "          <div class=\"qhead\">"+esc(q.text)+"</div>";
-          var photoAddBtnHtml = q.allowPhotos
+          var photoPolicy = photoPolicyFor(q);
+          var photoAddBtnHtml = photosActiveFor(type, idx, q)
             ? "<label class=\"photo-addbtn\" data-photo-add=\""+idx+"\" title=\"Attach photo evidence\">"+CAMERA_SVG+
               "<input type=\"file\" accept=\"image/*\" capture=\"environment\" multiple data-photo-input=\""+idx+"\" style=\"display:none\"></label>"
             : "";
@@ -1111,7 +1162,7 @@
             var cls = o==="Yes"||o==="Acceptable" ? "sel-yes" : (o==="No"||o==="Not Acceptable" ? "sel-no" : "sel-na");
             return "<button type=\"button\" class=\"opt "+cls+(d.answers[idx] && d.answers[idx].result===o?" chosen":"")+"\" data-opt=\""+escAttr(o)+"\">"+esc(o)+"</button>";
           }).join("") + photoAddBtnHtml + "</div>";
-          if (q.allowPhotos){
+          if (photoPolicy.allow){
             var photosForQ = (d.answers[idx] && d.answers[idx].photos) || [];
             if (photosForQ.length) html += "          <div class=\"photo-row\">";
             photosForQ.forEach(function(ph){
@@ -1731,7 +1782,7 @@
     if (!validTopicsDraft(type)){ if (errEl) errEl.classList.add("show"); return; }
     if (errEl) errEl.classList.remove("show");
 
-    var newTopics = topicsDraft[type].map(function(tp){ return { id:tp.id, text:tp.text.trim(), options:tp.options.slice(), good:tp.good, allowPhotos: !!tp.allowPhotos, requiresProductIdOnFail: !!tp.requiresProductIdOnFail }; });
+    var newTopics = topicsDraft[type].map(function(tp){ return { id:tp.id, text:tp.text.trim(), options:tp.options.slice(), good:tp.good, allowPhotos: !!tp.allowPhotos, photosOnFail: !!tp.photosOnFail, requiresProductIdOnFail: !!tp.requiresProductIdOnFail }; });
 
     // optimistic local update
     if (!STATE.topics) STATE.topics = {};
@@ -1908,6 +1959,19 @@
       if (remote && Array.isArray(remote.entries)){ STATE = remote; render(); }
     });
   }
+
+  // Photo thumbnails are deliberately small (so the checklist stays
+  // compact), but they should still be viewable at full size on demand.
+  // This is one delegated listener attached to the app container once —
+  // not re-attached per render() — so it keeps working for both
+  // in-progress draft photos and saved/read-only ones across every
+  // re-render.
+  document.getElementById("app").addEventListener("click", function(e){
+    var img = e.target.closest(".photo-thumb img");
+    if (!img) return;
+    var src = img.getAttribute("src");
+    if (src) window.open(src, "_blank");
+  });
 
   loadViewFromStorage();
   init();
