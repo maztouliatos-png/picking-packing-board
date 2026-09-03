@@ -340,7 +340,7 @@
     Picking: [
       { id:"pi1", text:"Correct quantity picked?", options:["Yes","No"], good:"Yes", requiresProductIdOnFail:true },
       { id:"pi2", text:"Any visible damage to the picked item(s) or their packaging (carton, inner or outer)?", options:["No","Yes"], good:"No" },
-      { id:"pi3", text:"Overall state of the pick - correct items, no damage, securely packed?", options:["Acceptable","Not Acceptable"], good:"Acceptable", allowPhotos:true }
+      { id:"pi3", text:"Overall state of the pick - correct items, no damage, securely packed?", options:["Acceptable","Not Acceptable"], good:"Acceptable", allowPhotos:true, photosOnFail:true }
     ]
   };
   var TYPE_KEYS = ["Picking","Packing"];
@@ -524,17 +524,19 @@
     return isBadAnswer(type, idx, a.result) && !(a.comment && a.comment.trim());
   }
   // Whether a question offers photo evidence at all, and whether the
-  // "add photo" control should only appear once the answer is failing (e.g.
-  // Packing's "Correct label placement..." question — a photo is only
-  // useful to explain what's wrong). The id check is a safety net: this
-  // question's wording has been customised via "Edit checklist" in the
-  // live board, and a topic loaded from Supabase won't carry a field this
-  // app didn't know about when it was saved, so the id keeps the on-fail
-  // photo behaviour working regardless of what's stored for it.
+  // "add photo" control should only appear once the answer is failing —
+  // Packing's "Correct label placement..." question and Picking's "Overall
+  // state of the pick..." question both only want a photo once something's
+  // actually wrong. The id check is a safety net: these questions' wording
+  // may have been customised via "Edit checklist" in the live board, and a
+  // topic loaded from Supabase won't carry a field this app didn't know
+  // about when it was saved, so the id keeps the on-fail photo behaviour
+  // working regardless of what's stored for it.
+  var PHOTOS_ON_FAIL_IDS = { pk4:true, pi3:true };
   function photoPolicyFor(q){
     if (!q) return { allow:false, onFail:false };
     var allow = !!q.allowPhotos, onFail = !!q.photosOnFail;
-    if (q.id === "pk4"){ allow = true; onFail = true; }
+    if (PHOTOS_ON_FAIL_IDS[q.id]){ allow = true; onFail = true; }
     return { allow: allow, onFail: onFail };
   }
   function photosActiveFor(type, idx, q){
