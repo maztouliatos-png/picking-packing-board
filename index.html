@@ -120,7 +120,7 @@
   .pill.active{ background:var(--ink); color:var(--bg); border-color:var(--ink); }
   .helper{ margin-top:12px; font-size:12.5px; color:var(--ink-dim); line-height:1.5; }
 
-  .pagetabs{ display:flex; gap:8px; margin-bottom:18px; }
+  .pagetabs{ display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap; }
   .pagetab{ font-family:inherit; font-size:13.5px; font-weight:600; color:var(--ink-dim); background:transparent;
     border:1px solid var(--border); border-radius:10px; padding:9px 18px; cursor:pointer; }
   .pagetab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
@@ -137,6 +137,18 @@
   .exporttype-pills .pill{ padding:5px 10px; font-size:12px; }
   .exportbar-actions{ display:flex; gap:8px; }
   .exportmsg{ font-size:12.5px; color:var(--ink-dim); margin:-8px 0 16px; }
+
+  .repeat-groups{ gap:10px; }
+  .repeat-group .result-top{ margin-bottom:0; }
+  .repeat-count{ font-size:11.5px; font-weight:700; color:var(--bad); background:var(--bad-bg); padding:3px 9px; border-radius:20px; flex:none; }
+  .repeat-entry{ margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .opid-warning{ display:none; margin-top:8px; padding:10px 12px; background:var(--bad-bg); border:1px solid var(--bad); border-radius:10px; font-size:12px; color:var(--ink); line-height:1.5; }
+  .opid-warning.show{ display:block; }
+  .opid-warning-title{ font-weight:700; color:var(--bad); margin-bottom:4px; }
+  .opid-warning-item{ margin-top:6px; padding-top:6px; border-top:1px solid rgba(226,116,94,0.3); }
+  .opid-warning-item:first-of-type{ border-top:none; padding-top:0; }
+  .opid-warning-meta{ font-size:11px; color:var(--ink-dim); margin-bottom:2px; }
+  .opid-warning-comment{ font-style:italic; margin-top:1px; }
 
   .countsbar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:-6px 0 16px; }
   .countchip{ font-family:inherit; font-size:12.5px; font-weight:600; color:var(--ink); background:var(--surface); border:1px solid var(--border);
@@ -379,6 +391,9 @@
   var dayOpenType = null; // "Picking" | "Packing" | null — which type's entries are expanded under the Daily counts
   var dayExportMsg = "";  // transient status line for the Daily export action (kept separate from Monthly's exportMsg)
   var exportType = "All"; // "All" | "Picking" | "Packing" — which type(s) Export CSV includes, shared by Daily and Monthly
+  var repeatExportType = "Picking"; // "Picking" | "Packing" — Repeat Failures tab's own CSV export selector, independent of exportType above
+  var repeatExportMsg = "";  // transient status line for the Repeat Failures export action
+  var repeatOpenGroups = {}; // "Type|normalizedOpId" -> bool, which repeat-failure groups are expanded
   // Barcode scanner overlay state: which field (if any) is currently being
   // scanned into, plus any camera/permission error to show in the modal.
   var scanState = { open:false, error:"", type:null, field:null };
@@ -423,7 +438,7 @@
       var saved = JSON.parse(raw);
       if (!saved || typeof saved !== "object") return;
       if (saved.bday !== isoDate(today)) return; // new business day — start fresh
-      if (saved.page === "log" || saved.page === "summary" || saved.page === "search") view.page = saved.page;
+      if (saved.page === "log" || saved.page === "summary" || saved.page === "search" || saved.page === "repeat") view.page = saved.page;
       if (saved.shift === "AM" || saved.shift === "PM" || saved.shift === "NS") view.shift = saved.shift;
       if (saved.type === "All" || TYPES[saved.type]) view.type = saved.type;
       if (saved.summaryMode === "date" || saved.summaryMode === "month") view.summaryMode = saved.summaryMode;
@@ -583,6 +598,94 @@
     }
   }
 
+  // --- Repeat-failure detection ------------------------------------------
+  // Auditors write Op IDs inconsistently ("OP-10559", "FOP10559", "10559"…)
+  // so every lookup/grouping goes through this normalizer first: strip
+  // whitespace and dashes, uppercase, then drop a leading "FOP" (checked
+  // before "OP", since it's the longer/more specific prefix) or "OP"
+  // prefix, leaving the bare digit string as the canonical key.
+  function normalizeOpId(raw){
+    var s = String(raw||"").replace(/[\s-]+/g,"").toUpperCase();
+    if (!s) return "";
+    if (s.indexOf("FOP") === 0) return s.slice(3);
+    if (s.indexOf("OP") === 0) return s.slice(2);
+    return s;
+  }
+  // A saved audit "failed" if any of its answers came back something other
+  // than that question's own stored "good" value ("N/A" never counts as a
+  // failure). Uses each answer's own snapshot, so this stays correct even
+  // after the live checklist has since been edited — and applies the same
+  // way to every question, Picking and Packing alike.
+  function entryHasFailure(e){
+    return (e.answers||[]).some(function(a){
+      return !!a.result && a.result !== a.good && a.result !== "N/A";
+    });
+  }
+  function entryFailedAnswers(e){
+    return (e.answers||[]).filter(function(a){
+      return !!a.result && a.result !== a.good && a.result !== "N/A";
+    });
+  }
+  // Every failed audit of a given type sharing a normalized Op ID, all-time,
+  // oldest first — backs the live inline warning while logging.
+  function failedEntriesForOpId(type, opId){
+    var norm = normalizeOpId(opId);
+    if (!norm) return [];
+    return STATE.entries.filter(function(e){
+      return e.type === type && normalizeOpId(e.fields && e.fields.opId) === norm && entryHasFailure(e);
+    }).sort(function(a,b){
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return SHIFTS.indexOf(a.shift) - SHIFTS.indexOf(b.shift);
+    });
+  }
+  // Every Op ID (of one type) with 2 or more failed audits on record,
+  // all-time — backs the standalone Repeat Failures tab.
+  function repeatFailureGroups(type){
+    var byNorm = {};
+    STATE.entries.forEach(function(e){
+      if (e.type !== type || !entryHasFailure(e)) return;
+      var raw = (e.fields && e.fields.opId) || "";
+      var norm = normalizeOpId(raw);
+      if (!norm) return;
+      (byNorm[norm] = byNorm[norm] || []).push(e);
+    });
+    var groups = Object.keys(byNorm).map(function(norm){
+      var entries = byNorm[norm].slice().sort(function(a,b){
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return SHIFTS.indexOf(a.shift) - SHIFTS.indexOf(b.shift);
+      });
+      return { norm: norm, opId: entries[entries.length-1].fields.opId || norm, entries: entries };
+    }).filter(function(g){ return g.entries.length >= 2; });
+    groups.sort(function(a,b){ return b.entries.length - a.entries.length || (a.opId < b.opId ? -1 : 1); });
+    return groups;
+  }
+  // Inline warning shown under the Op ID field while logging a new audit —
+  // dates, shift, auditor and the failing question(s)/comments from every
+  // prior failed audit for this same (normalized) Op ID, same type.
+  function opIdWarningHtml(type, rawOpId){
+    var failed = failedEntriesForOpId(type, rawOpId);
+    if (failed.length < 2) return "";
+    var html = "<div class=\"opid-warning-title\">"+failed.length+" prior failed "+type.toLowerCase()+" audits for this Op ID</div>";
+    failed.slice().reverse().forEach(function(e){
+      var badAnswers = entryFailedAnswers(e);
+      html += "<div class=\"opid-warning-item\">";
+      html += "<div class=\"opid-warning-meta\">"+headingLabel(parseIso(e.date))+" &middot; "+e.shift+(e.auditor?" &middot; "+esc(e.auditor):"")+"</div>";
+      badAnswers.forEach(function(a){
+        html += "<div>"+esc(a.text)+": <strong>"+esc(a.result)+"</strong></div>";
+        if (a.comment) html += "<div class=\"opid-warning-comment\">&ldquo;"+esc(a.comment)+"&rdquo;</div>";
+      });
+      html += "</div>";
+    });
+    return html;
+  }
+  function refreshOpIdWarning(type, inputEl){
+    var container = inputEl.parentNode.querySelector("[data-opid-warning]");
+    if (!container) return;
+    var html = opIdWarningHtml(type, inputEl.value);
+    container.innerHTML = html;
+    container.classList.toggle("show", !!html);
+  }
+
   function entriesFor(type){
     var d = isoDate(view.date);
     return STATE.entries.filter(function(e){ return e.date===d && e.shift===view.shift && e.type===type; });
@@ -645,7 +748,8 @@
               "<button type=\"button\" class=\"scanbtn\" data-scan-field=\""+f.key+"\" title=\"Scan barcode\">"+BARCODE_SVG+"</button>" +
               "</div></div>";
     }
-    return "<div class=\"fld\"><span class=\"field-label\">"+f.label+"</span><input class=\"txt\" data-field=\""+f.key+"\" placeholder=\""+f.placeholder+"\"></div>";
+    var opidWarning = f.key === "opId" ? "<div class=\"opid-warning\" data-opid-warning=\"1\"></div>" : "";
+    return "<div class=\"fld\"><span class=\"field-label\">"+f.label+"</span><input class=\"txt\" data-field=\""+f.key+"\" placeholder=\""+f.placeholder+"\">"+opidWarning+"</div>";
   }
 
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
@@ -793,6 +897,35 @@
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
     var typeLabel = exportType === "All" ? "" : exportType + " ";
     dayExportMsg = "Exported " + entries.length + " " + typeLabel + "audit" + (entries.length===1?"":"s") + " for " + headingLabel(view.date) + " (" + view.shift + ") to CSV.";
+    render();
+  }
+
+  // Every failed audit, of one type, that belongs to a flagged (2+ repeat
+  // failure) Op ID — backs the Repeat Failures tab's own CSV export, which
+  // has its own Picking/Packing selector independent of the Summary tab's.
+  function repeatExportEntriesFor(type){
+    var groups = repeatFailureGroups(type);
+    var ids = {};
+    groups.forEach(function(g){ g.entries.forEach(function(e){ ids[e.id] = true; }); });
+    return STATE.entries.filter(function(e){ return e.type === type && ids[e.id]; }).sort(function(a,b){
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return SHIFTS.indexOf(a.shift) - SHIFTS.indexOf(b.shift);
+    });
+  }
+  function exportRepeatFailures(){
+    var entries = repeatExportEntriesFor(repeatExportType);
+    if (!entries.length) return;
+    var csv = buildCsv(entries);
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "repeat-failures-" + repeatExportType + "-" + isoDate(today) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    repeatExportMsg = "Exported " + entries.length + " failed " + repeatExportType + " audit" + (entries.length===1?"":"s") + " across flagged Op IDs to CSV.";
     render();
   }
 
@@ -957,6 +1090,7 @@
     var isLog = view.page === "log";
     var isSummary = view.page === "summary";
     var isSearch = view.page === "search";
+    var isRepeat = view.page === "repeat";
     var isSummaryMonth = isSummary && view.summaryMode === "month"; // the old "Monthly" page, now a view inside Summary
     // On Log, always exactly the type being logged. On Daily Summary, nothing
     // shows until a counts chip is pressed open (mirrors Monthly's open list).
@@ -976,6 +1110,7 @@
             "<button type=\"button\" class=\"pagetab"+(isLog?" active":"")+"\" data-page=\"log\">Log Audits</button>" +
             "<button type=\"button\" class=\"pagetab"+(isSummary?" active":"")+"\" data-page=\"summary\">Summary</button>" +
             "<button type=\"button\" class=\"pagetab"+(isSearch?" active":"")+"\" data-page=\"search\">Search</button>" +
+            "<button type=\"button\" class=\"pagetab"+(isRepeat?" active":"")+"\" data-page=\"repeat\">Repeat Failures</button>" +
             "</div>";
 
     // The Daily/Monthly toggle only appears on the Summary page — it swaps
@@ -1013,6 +1148,8 @@
       html += "    <div><span class=\"field-label\">Month</span><select id=\"monthSel\" class=\"sel mono\"></select></div>";
       html += "  </div>";
       html += "  </div>";
+    } else if (isRepeat){
+      html += "  <div class=\"controls\"><div class=\"helper\">Op IDs with 2 or more failed audits on record, across every date and shift.</div></div>";
     } else {
       html += "  <div class=\"controls\"><div class=\"control-row\">";
       if (isSummary){ html += "    " + summaryModePillsHtml(); }
@@ -1032,7 +1169,7 @@
       html += "  </div>";
     }
 
-    if (!isSummaryMonth && !isSearch){
+    if (!isSummaryMonth && !isSearch && !isRepeat){
       html += "  <div class=\"dayhead\">" + headingLabel(view.date) + "<span class=\"shift-tag\">" + view.shift + "</span></div>";
     }
 
@@ -1109,6 +1246,50 @@
       html += "  <div class=\"exportbar\">";
       html += "    <span class=\"exportbar-count\">"+monthExportEntries.length+" "+monthExportLabel+" logged this month</span>";
       html += "    <span class=\"exportbar-actions\">" + exportTypePillsHtml() + "<button type=\"button\" class=\"btn primary\" id=\"exportMonthBtn\""+(monthExportEntries.length?"":" disabled")+">Export CSV</button></span>";
+      html += "  </div>";
+    } else if (isRepeat){
+      var repeatExportEntries = repeatExportEntriesFor(repeatExportType);
+      html += "  <div class=\"exportbar\">";
+      html += "    <span class=\"exportbar-count\">"+repeatExportEntries.length+" failed "+repeatExportType.toLowerCase()+" audit"+(repeatExportEntries.length===1?"":"s")+" across flagged Op IDs</span>";
+      html += "    <span class=\"exportbar-actions\">" +
+              "<div class=\"pillgroup exporttype-pills\" id=\"repeatExportTypePills\">" +
+                ["Picking","Packing"].map(function(t){ return "<button type=\"button\" class=\"pill"+(repeatExportType===t?" active":"")+"\" data-repeat-export-type=\""+t+"\">"+t+"</button>"; }).join("") +
+              "</div>" +
+              "<button type=\"button\" class=\"btn primary\" id=\"repeatExportBtn\""+(repeatExportEntries.length?"":" disabled")+">Export CSV</button></span>";
+      html += "  </div>";
+      if (repeatExportMsg) html += "  <div class=\"exportmsg\">"+esc(repeatExportMsg)+"</div>";
+      html += "  <div class=\"sections\">";
+      TYPE_KEYS.forEach(function(type){
+        var groups = repeatFailureGroups(type);
+        html += "  <div class=\"section\">";
+        html += "    <div class=\"section-head\"><h2>"+type+"</h2><span class=\"result-meta\">"+groups.length+" flagged Op ID"+(groups.length===1?"":"s")+"</span></div>";
+        if (!groups.length){
+          html += "    <div class=\"entrylist\"><div class=\"empty-list\">No "+type.toLowerCase()+" Op IDs with repeat failures yet.</div></div>";
+        } else {
+          html += "    <div class=\"search-results repeat-groups\">";
+          groups.forEach(function(g){
+            var groupKey = type+"|"+g.norm;
+            var open = !!repeatOpenGroups[groupKey];
+            html += "      <div class=\"result repeat-group"+(open?" open":"")+"\" data-repeat-type=\""+type+"\" data-repeat-norm=\""+escAttr(g.norm)+"\">";
+            html += "        <div class=\"result-top\"><span class=\"result-id mono\">"+esc(g.opId||g.norm)+"</span>" +
+                    "<span class=\"repeat-count\">"+g.entries.length+" failed audits</span></div>";
+            if (open){
+              g.entries.slice().reverse().forEach(function(e){
+                var badAnswers = entryFailedAnswers(e);
+                html += "        <div class=\"entry-detail repeat-entry\">";
+                html += "          <div class=\"result-meta\">"+headingLabel(parseIso(e.date))+" &middot; "+e.shift+(e.auditor?" &middot; "+esc(e.auditor):"")+"</div>";
+                badAnswers.forEach(function(a){
+                  html += "          <div class=\"qrow\"><span class=\"qtext\">"+esc(a.text)+(a.comment?"<div class=\"qcomment\">"+esc(a.comment)+"</div>":"")+"</span><span class=\"qtag fail\">"+esc(a.result)+"</span></div>";
+                });
+                html += "        </div>";
+              });
+            }
+            html += "      </div>";
+          });
+          html += "    </div>";
+        }
+        html += "  </div>";
+      });
       html += "  </div>";
     } else {
     if (isSummary){
@@ -1268,7 +1449,7 @@
       if (!scanState.error) startScanner();
     }
 
-    if (!isSearch && !isSummaryMonth){
+    if (!isSearch && !isSummaryMonth && !isRepeat){
       document.getElementById("dateBtn").addEventListener("click", function(){
         dateCalOpen = !dateCalOpen;
         if (dateCalOpen) dateCalMonth = new Date(view.date.getFullYear(), view.date.getMonth(), 1);
@@ -1398,6 +1579,24 @@
       if (passInput) passInput.addEventListener("keydown", function(e){ if (e.key === "Enter") document.getElementById("clearConfirm").click(); });
     }
 
+    if (isRepeat){
+      var repeatExportTypePillsEl = document.getElementById("repeatExportTypePills");
+      if (repeatExportTypePillsEl) repeatExportTypePillsEl.addEventListener("click", function(e){
+        var btn = e.target.closest(".pill"); if (!btn) return;
+        repeatExportType = btn.getAttribute("data-repeat-export-type");
+        render();
+      });
+      var repeatExportBtn = document.getElementById("repeatExportBtn");
+      if (repeatExportBtn) repeatExportBtn.addEventListener("click", function(){ exportRepeatFailures(); });
+      app.querySelectorAll(".repeat-group").forEach(function(card){
+        card.addEventListener("click", function(){
+          var key = card.getAttribute("data-repeat-type") + "|" + card.getAttribute("data-repeat-norm");
+          repeatOpenGroups[key] = !repeatOpenGroups[key];
+          render();
+        });
+      });
+    }
+
     if (isLog){
       typesToShow.forEach(function(type){
         var section = app.querySelector('.section[data-type="'+type+'"]');
@@ -1502,7 +1701,12 @@
           }
           form.querySelectorAll("input.txt[data-field]").forEach(function(inp){
             inp.value = d.fields[inp.getAttribute("data-field")] || "";
-            inp.addEventListener("input", function(){ d.fields[inp.getAttribute("data-field")] = inp.value; });
+            var isOpIdField = inp.getAttribute("data-field") === "opId";
+            inp.addEventListener("input", function(){
+              d.fields[inp.getAttribute("data-field")] = inp.value;
+              if (isOpIdField) refreshOpIdWarning(type, inp);
+            });
+            if (isOpIdField) refreshOpIdWarning(type, inp);
           });
           form.querySelectorAll("[data-scan-field]").forEach(function(btn){
             btn.addEventListener("click", function(){ openScanner(type, btn.getAttribute("data-scan-field")); });
