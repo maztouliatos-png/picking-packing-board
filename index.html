@@ -605,7 +605,11 @@
   // before "OP", since it's the longer/more specific prefix) or "OP"
   // prefix, leaving the bare digit string as the canonical key.
   function normalizeOpId(raw){
-    var s = String(raw||"").replace(/[\s-]+/g,"").toUpperCase();
+    // Auditors separate the prefix from the digits with a dash, an
+    // underscore, a space, or nothing at all ("OP-10559", "OP_10559",
+    // "OP 10559", "OP10559") — all of that gets stripped before the
+    // FOP/OP prefix check, so every spelling collapses to the same key.
+    var s = String(raw||"").replace(/[\s_-]+/g,"").toUpperCase();
     if (!s) return "";
     if (s.indexOf("FOP") === 0) return s.slice(3);
     if (s.indexOf("OP") === 0) return s.slice(2);
