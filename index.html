@@ -391,7 +391,7 @@
   var dayOpenType = null; // "Picking" | "Packing" | null — which type's entries are expanded under the Daily counts
   var dayExportMsg = "";  // transient status line for the Daily export action (kept separate from Monthly's exportMsg)
   var exportType = "All"; // "All" | "Picking" | "Packing" — which type(s) Export CSV includes, shared by Daily and Monthly
-  var repeatExportType = "Picking"; // "Picking" | "Packing" — Repeat Failures tab's own CSV export selector, independent of exportType above
+  var repeatType = "Picking"; // "Picking" | "Packing" — which type's flagged Op IDs the Repeat Failures tab shows (and exports), independent of exportType above
   var repeatExportMsg = "";  // transient status line for the Repeat Failures export action
   var repeatOpenGroups = {}; // "Type|normalizedOpId" -> bool, which repeat-failure groups are expanded
   // Barcode scanner overlay state: which field (if any) is currently being
@@ -917,19 +917,19 @@
     });
   }
   function exportRepeatFailures(){
-    var entries = repeatExportEntriesFor(repeatExportType);
+    var entries = repeatExportEntriesFor(repeatType);
     if (!entries.length) return;
     var csv = buildCsv(entries);
     var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = "repeat-failures-" + repeatExportType + "-" + isoDate(today) + ".csv";
+    a.download = "repeat-failures-" + repeatType + "-" + isoDate(today) + ".csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-    repeatExportMsg = "Exported " + entries.length + " failed " + repeatExportType + " audit" + (entries.length===1?"":"s") + " across flagged Op IDs to CSV.";
+    repeatExportMsg = "Exported " + entries.length + " failed " + repeatType + " audit" + (entries.length===1?"":"s") + " across flagged Op IDs to CSV.";
     render();
   }
 
@@ -1153,7 +1153,13 @@
       html += "  </div>";
       html += "  </div>";
     } else if (isRepeat){
-      html += "  <div class=\"controls\"><div class=\"helper\">Op IDs with 2 or more failed audits on record, across every date and shift.</div></div>";
+      html += "  <div class=\"controls\"><div class=\"control-row\">";
+      html += "    <div><span class=\"field-label\">Audit Type</span><div class=\"pillgroup\" id=\"repeatTypePills\">" +
+                TYPE_KEYS.map(function(t){ return "<button type=\"button\" class=\"pill"+(repeatType===t?" active":"")+"\" data-repeat-type=\""+t+"\">"+t+"</button>"; }).join("") +
+              "</div></div>";
+      html += "  </div>";
+      html += "  <div class=\"helper\">Op IDs with 2 or more failed "+repeatType.toLowerCase()+" audits on record, across every date and shift.</div>";
+      html += "  </div>";
     } else {
       html += "  <div class=\"controls\"><div class=\"control-row\">";
       if (isSummary){ html += "    " + summaryModePillsHtml(); }
@@ -1252,48 +1258,41 @@
       html += "    <span class=\"exportbar-actions\">" + exportTypePillsHtml() + "<button type=\"button\" class=\"btn primary\" id=\"exportMonthBtn\""+(monthExportEntries.length?"":" disabled")+">Export CSV</button></span>";
       html += "  </div>";
     } else if (isRepeat){
-      var repeatExportEntries = repeatExportEntriesFor(repeatExportType);
+      var repeatGroups = repeatFailureGroups(repeatType);
+      var repeatExportEntries = repeatExportEntriesFor(repeatType);
       html += "  <div class=\"exportbar\">";
-      html += "    <span class=\"exportbar-count\">"+repeatExportEntries.length+" failed "+repeatExportType.toLowerCase()+" audit"+(repeatExportEntries.length===1?"":"s")+" across flagged Op IDs</span>";
-      html += "    <span class=\"exportbar-actions\">" +
-              "<div class=\"pillgroup exporttype-pills\" id=\"repeatExportTypePills\">" +
-                ["Picking","Packing"].map(function(t){ return "<button type=\"button\" class=\"pill"+(repeatExportType===t?" active":"")+"\" data-repeat-export-type=\""+t+"\">"+t+"</button>"; }).join("") +
-              "</div>" +
-              "<button type=\"button\" class=\"btn primary\" id=\"repeatExportBtn\""+(repeatExportEntries.length?"":" disabled")+">Export CSV</button></span>";
+      html += "    <span class=\"exportbar-count\">"+repeatGroups.length+" flagged "+repeatType.toLowerCase()+" Op ID"+(repeatGroups.length===1?"":"s")+" ("+repeatExportEntries.length+" failed audit"+(repeatExportEntries.length===1?"":"s")+")</span>";
+      html += "    <span class=\"exportbar-actions\"><button type=\"button\" class=\"btn primary\" id=\"repeatExportBtn\""+(repeatExportEntries.length?"":" disabled")+">Export CSV</button></span>";
       html += "  </div>";
       if (repeatExportMsg) html += "  <div class=\"exportmsg\">"+esc(repeatExportMsg)+"</div>";
       html += "  <div class=\"sections\">";
-      TYPE_KEYS.forEach(function(type){
-        var groups = repeatFailureGroups(type);
-        html += "  <div class=\"section\">";
-        html += "    <div class=\"section-head\"><h2>"+type+"</h2><span class=\"result-meta\">"+groups.length+" flagged Op ID"+(groups.length===1?"":"s")+"</span></div>";
-        if (!groups.length){
-          html += "    <div class=\"entrylist\"><div class=\"empty-list\">No "+type.toLowerCase()+" Op IDs with repeat failures yet.</div></div>";
-        } else {
-          html += "    <div class=\"search-results repeat-groups\">";
-          groups.forEach(function(g){
-            var groupKey = type+"|"+g.norm;
-            var open = !!repeatOpenGroups[groupKey];
-            html += "      <div class=\"result repeat-group"+(open?" open":"")+"\" data-repeat-type=\""+type+"\" data-repeat-norm=\""+escAttr(g.norm)+"\">";
-            html += "        <div class=\"result-top\"><span class=\"result-id mono\">"+esc(g.opId||g.norm)+"</span>" +
-                    "<span class=\"repeat-count\">"+g.entries.length+" failed audits</span></div>";
-            if (open){
-              g.entries.slice().reverse().forEach(function(e){
-                var badAnswers = entryFailedAnswers(e);
-                html += "        <div class=\"entry-detail repeat-entry\">";
-                html += "          <div class=\"result-meta\">"+headingLabel(parseIso(e.date))+" &middot; "+e.shift+(e.auditor?" &middot; "+esc(e.auditor):"")+"</div>";
-                badAnswers.forEach(function(a){
-                  html += "          <div class=\"qrow\"><span class=\"qtext\">"+esc(a.text)+(a.comment?"<div class=\"qcomment\">"+esc(a.comment)+"</div>":"")+"</span><span class=\"qtag fail\">"+esc(a.result)+"</span></div>";
-                });
-                html += "        </div>";
+      html += "  <div class=\"section\">";
+      if (!repeatGroups.length){
+        html += "    <div class=\"entrylist\"><div class=\"empty-list\">No "+repeatType.toLowerCase()+" Op IDs with repeat failures yet.</div></div>";
+      } else {
+        html += "    <div class=\"search-results repeat-groups\">";
+        repeatGroups.forEach(function(g){
+          var groupKey = repeatType+"|"+g.norm;
+          var open = !!repeatOpenGroups[groupKey];
+          html += "      <div class=\"result repeat-group"+(open?" open":"")+"\" data-repeat-norm=\""+escAttr(g.norm)+"\">";
+          html += "        <div class=\"result-top\"><span class=\"result-id mono\">"+esc(g.opId||g.norm)+"</span>" +
+                  "<span class=\"repeat-count\">"+g.entries.length+" failed audits</span></div>";
+          if (open){
+            g.entries.slice().reverse().forEach(function(e){
+              var badAnswers = entryFailedAnswers(e);
+              html += "        <div class=\"entry-detail repeat-entry\">";
+              html += "          <div class=\"result-meta\">"+headingLabel(parseIso(e.date))+" &middot; "+e.shift+(e.auditor?" &middot; "+esc(e.auditor):"")+"</div>";
+              badAnswers.forEach(function(a){
+                html += "          <div class=\"qrow\"><span class=\"qtext\">"+esc(a.text)+(a.comment?"<div class=\"qcomment\">"+esc(a.comment)+"</div>":"")+"</span><span class=\"qtag fail\">"+esc(a.result)+"</span></div>";
               });
-            }
-            html += "      </div>";
-          });
-          html += "    </div>";
-        }
-        html += "  </div>";
-      });
+              html += "        </div>";
+            });
+          }
+          html += "      </div>";
+        });
+        html += "    </div>";
+      }
+      html += "  </div>";
       html += "  </div>";
     } else {
     if (isSummary){
@@ -1584,17 +1583,17 @@
     }
 
     if (isRepeat){
-      var repeatExportTypePillsEl = document.getElementById("repeatExportTypePills");
-      if (repeatExportTypePillsEl) repeatExportTypePillsEl.addEventListener("click", function(e){
+      var repeatTypePillsEl = document.getElementById("repeatTypePills");
+      if (repeatTypePillsEl) repeatTypePillsEl.addEventListener("click", function(e){
         var btn = e.target.closest(".pill"); if (!btn) return;
-        repeatExportType = btn.getAttribute("data-repeat-export-type");
+        repeatType = btn.getAttribute("data-repeat-type");
         render();
       });
       var repeatExportBtn = document.getElementById("repeatExportBtn");
       if (repeatExportBtn) repeatExportBtn.addEventListener("click", function(){ exportRepeatFailures(); });
       app.querySelectorAll(".repeat-group").forEach(function(card){
         card.addEventListener("click", function(){
-          var key = card.getAttribute("data-repeat-type") + "|" + card.getAttribute("data-repeat-norm");
+          var key = repeatType + "|" + card.getAttribute("data-repeat-norm");
           repeatOpenGroups[key] = !repeatOpenGroups[key];
           render();
         });
