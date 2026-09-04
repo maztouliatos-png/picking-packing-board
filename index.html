@@ -620,15 +620,25 @@
   // failure). Uses each answer's own snapshot, so this stays correct even
   // after the live checklist has since been edited — and applies the same
   // way to every question, Picking and Packing alike.
+  // Packing's "Correct packaging used?" (pk1) failing because a drop test
+  // was needed/done isn't a genuine packaging defect for repeat-offender
+  // tracking purposes — it's expected process, so a comment mentioning a
+  // drop test (in any wording: "drop test needed", "drop test done", etc.)
+  // excludes that one answer from counting as a failure here.
+  var DROP_TEST_EXCLUDED_IDS = { pk1:true };
+  function isDropTestComment(comment){
+    return /drop test/i.test(String(comment||""));
+  }
+  function answerCountsAsFailure(a){
+    if (!a || !a.result || a.result === a.good || a.result === "N/A") return false;
+    if (DROP_TEST_EXCLUDED_IDS[a.qid] && isDropTestComment(a.comment)) return false;
+    return true;
+  }
   function entryHasFailure(e){
-    return (e.answers||[]).some(function(a){
-      return !!a.result && a.result !== a.good && a.result !== "N/A";
-    });
+    return (e.answers||[]).some(answerCountsAsFailure);
   }
   function entryFailedAnswers(e){
-    return (e.answers||[]).filter(function(a){
-      return !!a.result && a.result !== a.good && a.result !== "N/A";
-    });
+    return (e.answers||[]).filter(answerCountsAsFailure);
   }
   // Every failed audit of a given type sharing a normalized Op ID, all-time,
   // oldest first — backs the live inline warning while logging.
